@@ -1,0 +1,3 @@
+duck,fork,horse,key,ASLduck,
+knife,meat,milk3,monkey r,ASLmonkey,
+banana,bike,book,door,ASLbanana,
