@@ -5,14 +5,13 @@ using System.IO;
 using UnityEngine.Video;
 
 /// <summary>
-/// This class manages the Unity Scene for a Visual Word Paradigm experiment. There are three main phases in this experiment paradigm:
+/// There are two main phases in this experiment paradigm:
 ///     Callibration
-///         A fixation dot is shown for 1000ms and the subject is asked to look at it.
+///         A fixation dot is shown for and the subject is asked to look at it for a time
 ///     Data Collection
-///         A visual stimulus is shown for 1000ms
-///         A video recording is played. 2000ms after the video recording finishes, the scene transfers to the next stimulus.
-///     Termination
-///         Once all stimuli have run, the program write out the collected data and resets for the next subject.
+///         A visual stimulus is shown for
+///         A video recording is played. A short time after the video recording finishes, the scene transfers to the next stimulus.
+/// Author: Siothrún (Jeffrey) Sardina
 /// </summary>
 public class VCP_CameraController : MonoBehaviour
 {
@@ -20,16 +19,16 @@ public class VCP_CameraController : MonoBehaviour
     //Camera data
     Camera vrCam;
 
-    //Experiment Data Collected
+    //Output
+    StreamWriter writer;
     LinkedList<string> frameDataList = new LinkedList<string>();
 
-    //Logging
-    StreamWriter logger,
-        writer;
-
     //Experiment constants
-    const string PARADIGM_PATH = "Video-Corner Paradigm/";
-    readonly Vector3 DISPLAY_LOCATION = new Vector3(0, 1.5f, 10);
+    const string PARADIGM_PATH = "Video-Corner Paradigm/",
+        DATA_EXTENSION = ".csv",
+        EXPERIMENT_FILE_FULL_NAME = "GT_",
+        FIXATION_DOT = "FixationDot",
+        READY_DOT = "ReadyDot";
     const int FIXATION_DOT_DISPLAY_TIME = 1,
         READY_DOT_DISPLAY_TIME = 1,
         IMAGE_INITIAL_DISPLAY_TIME_PRE_READY_DOT = 3,
@@ -39,9 +38,8 @@ public class VCP_CameraController : MonoBehaviour
         IMAGE_PLANE_SIDE_LENGTH = 3,
         FRAME_DATA_BUFFER_SIZE = 10;
     const float IMAGE_SCALE = 3f;
-    const string FIXATION_DOT = "FixationDot",
-        READY_DOT = "ReadyDot";
-    readonly Vector3 QI = new Vector3(9, 7, 0),
+    readonly Vector3 DISPLAY_LOCATION = new Vector3(0, 0, 10),
+        QI = new Vector3(9, 7, 0),
         QII = new Vector3(-9, 7, 0),
         QIV = new Vector3(9, -7, 0),
         QIII = new Vector3(-9, -7, 0);
@@ -50,16 +48,8 @@ public class VCP_CameraController : MonoBehaviour
     readonly List<string[]> STIMULUS_LIST = new List<string[]>();
     readonly List<string> VIDEO_LIST = new List<string>();
     readonly LinkedList<GameObject> CURRENT_STIMULI = new LinkedList<GameObject>();
-    GameObject text,
-        videoPlane;
-    System.Random GENERATOR = new System.Random();
-
-    string dateTimeNow,
-        experimentFileBaseName,
-        experimentFileFullName,
+    string experimentFileFullName,
         path,
-        dataExtension,
-        logExtension,
         experimentSpecificationsFileName,
         videoName = "",
         q1ImageName = "",
@@ -70,7 +60,9 @@ public class VCP_CameraController : MonoBehaviour
         stimuliNames = ",,,,";
     GameObject fixationDot,
         readyDot,
-        thankYou;
+        thankYou,
+        text,
+        videoPlane;
     VideoPlayer videoPlayer;
     float fixationDotEarliestContinuousHitTime = -1,
         readyDotEarliestContinuousHitTime = -1,
@@ -84,54 +76,46 @@ public class VCP_CameraController : MonoBehaviour
         videoDisplayDone,
         videoPlayingDone,
         resetting,
-        fullResetting,
-        dataWritten = false,
         trainingOver,
         startUpOver;
     int currentStimuliListIndex = -1;
     #endregion //instance data
 
     #region initialization functions
+    /// <summary>
+    /// This function is called once Unity has set up the scene.
+    /// It initializes everythnig required for the experiment, but does not beginf the experiment
+    ///     The experiment begins once Unity (separately) called Upadte()
+    /// </summary>
     void Start()
     {
-        BeginExperiment();
-    }
-
-    void BeginExperiment()
-    {
-        //Configure file system info
-        ConfigureFileSystem();
-
-        //Init logging
-        logger = File.AppendText(path + experimentFileFullName + logExtension);
-        Log("BeginExperiment: Logging started for current subject");
+        ConfigureFileData();
+        InitOutputStream();
+        InitStimuliList();
 
         //Initialize Camera and data collection
         vrCam = gameObject.GetComponent(typeof(Camera)) as Camera;
 
-        InitOutputStream();
-
-        //Collect stimuli into sets that will be shown
-        InitStimuliList();
-
         //Display the background and fixation dot to get started
         DisplayBackgroundPlane(DISPLAY_LOCATION + new Vector3(0, 0, .01f)); //Offset a tad
-        Log("BeginExperiment: Initialization complete");
         currentEvent = "Beginning training";
-        recordData("QI image,QII image,QIII image,QIV image,video,stimulus ID,event,time,timeSinceLastEvent,x,y,z", true);
     }
 
-    void ConfigureFileSystem()
+    /// <summary>
+    /// Sets up the output path and determines the names of output files for this experiment.
+    /// Should be called before InitOutputStream
+    /// </summary>
+    void ConfigureFileData()
     {
-        dateTimeNow = getCleanDateTime();
         path = Application.persistentDataPath + "/";
-        experimentFileBaseName = "ET_VR_";
-        dataExtension = ".csv";
-        logExtension = ".log";
-        experimentFileFullName = experimentFileBaseName + dateTimeNow + dataExtension;
+        experimentFileFullName = EXPERIMENT_FILE_FULL_NAME + getCleanDateTime() + DATA_EXTENSION;
         experimentSpecificationsFileName = "EyeTrackerVRData_0";
     }
 
+    /// <summary>
+    /// Sets up the output stream and writes header data
+    /// Precondition: ConfigureFileData has been called
+    /// </summary>
     void InitOutputStream()
     {
         try
@@ -141,14 +125,23 @@ public class VCP_CameraController : MonoBehaviour
             writer.WriteLine("QII," + ExactPoint(DISPLAY_LOCATION + QII));
             writer.WriteLine("QIII," + ExactPoint(DISPLAY_LOCATION + QIII));
             writer.WriteLine("QIV," + ExactPoint(DISPLAY_LOCATION + QIV));
+            RecordData("QI image,QII image,QIII image,QIV image,video,stimulus ID,event,time,timeSinceLastEvent,x,y,z", true);
         }
         catch (Exception ex)
         {
-            Log("CameraController: WriteData: Failed to write data file!");
-            Log(ex.StackTrace);
+            Debug.Log("CameraController: WriteData: Failed to write data file!");
+            Debug.Log(ex.StackTrace);
         }
     }
 
+    /// <summary>
+    /// Initializes the list of stimuli to display. Stimuli are split into two parts:
+    ///     Training stimuli
+    ///     Experimental stimuli
+    /// Training stimuli are always the same for all subjects (the first NUM_TRAINING_STIMULI entries in the experiment file)
+    /// Experiment stimuli vary betweeen subjects
+    /// The location of images for each round are also randomized.
+    /// </summary>
     void InitStimuliList()
     {
         List<string[]> trainingList = new List<string[]>();
@@ -199,16 +192,17 @@ public class VCP_CameraController : MonoBehaviour
     }
 
     /// <summary>
-    /// Uses the Fisher-Yates algorithm. Reference for the algorithm here:
-    /// https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
+    /// `Randomizes the given array using the Fisher-Yates algorithm. Reference for the algorithm here:
+    ///     https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
     /// </summary>
     /// <typeparam name="T"></typeparam>
     /// <param name="array"></param>
     void ShuffleArray<T>(T[] array)
     {
+        System.Random gen = new System.Random();
         for (int i = 0; i < array.Length - 2; i++)
         {
-            int randomIndex = GENERATOR.Next(0, array.Length);
+            int randomIndex = gen.Next(0, array.Length);
             T temp = array[i];
             array[i] = array[randomIndex];
             array[randomIndex] = temp;
@@ -216,15 +210,16 @@ public class VCP_CameraController : MonoBehaviour
     }
 
     /// <summary>
-    /// Uses the Fisher-Yates algorithm. Reference for the algorithm here:
-    /// https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
+    /// Randomized the given list using the Fisher-Yates algorithm. Reference for the algorithm here:
+    ///     https://en.wikipedia.org/wiki/Fisher%E2%80%93Yates_shuffle
     /// </summary>
     /// <param name="array"></param>
     void ShuffleList<T>(List<T> list)
     {
+        System.Random gen = new System.Random();
         for (int i = 0; i < list.Count - 2; i++)
         {
-            int randomIndex = GENERATOR.Next(0, list.Count);
+            int randomIndex = gen.Next(0, list.Count);
             T temp = list[i];
             list[i] = list[randomIndex];
             list[randomIndex] = temp;
@@ -232,21 +227,13 @@ public class VCP_CameraController : MonoBehaviour
     }
     #endregion //initialization functions
 
-    void OnApplicationQuit()
-    {
-        WriteData();
-        writer.Close();
-    }
-
-    void Log(string message, string level = "info")
-    {
-        logger.WriteLine(level + " --- " + DateTime.Now.ToLongDateString() + " at " + DateTime.Now.ToLongTimeString());
-        logger.WriteLine("Ecexution Time (s): " + Time.time);
-        logger.WriteLine(message);
-        logger.WriteLine("");
-    }
-
     #region display functions
+    /// <summary>
+    /// Displays a fixation dot. This function places the dot GameObject in 3D space and returns that GameObject.
+    /// </summary>
+    /// <param name="location">The location to display the dot</param>
+    /// <param name="name">The name of the dot</param>
+    /// <returns></returns>
     GameObject DisplayFixationDot(Vector3 location, string name)
     {
         //Place the fixation dot
@@ -256,6 +243,11 @@ public class VCP_CameraController : MonoBehaviour
         return dot;
     }
 
+    /// <summary>
+    /// Displays a background plane so that user gaze movement can be tracked in its motion accross the plane.
+    /// </summary>
+    /// <param name="location"></param>
+    /// <returns></returns>
     GameObject DisplayBackgroundPlane(Vector3 location)
     {
         //Instantiate the prefab plane for displaying images and set its loccation
@@ -267,6 +259,14 @@ public class VCP_CameraController : MonoBehaviour
         return backgroudPlane;
     }
 
+    /// <summary>
+    /// Displays a single image in 3D space.
+    /// </summary>
+    /// <param name="imageFileName">The name of the image to display</param>
+    /// <param name="location">Where to display the image</param>
+    /// <param name="scale">The factor by which to scale the iamge</param>
+    /// <param name="path">The path to the folder in which the image is. Defaults to stimuli/images/</param>
+    /// <returns></returns>
     GameObject DisplayImage(string imageFileName, Vector3 location, float scale, string path = PARADIGM_PATH + "stimuli/images/")
     {
         //Instantiate the prefab plane for displaying images and set its loccation
@@ -284,10 +284,13 @@ public class VCP_CameraController : MonoBehaviour
         image_material.mainTexture = image_texture;
         imagePlane.GetComponent<Renderer>().material = image_material;
 
-        recordData("Scaled size of " + imageFileName + ": (" + (unitdim.x * scale * IMAGE_PLANE_SIDE_LENGTH) + " : " + (unitdim.y * scale * IMAGE_PLANE_SIDE_LENGTH) + ")", true);
+        RecordData("Scaled size of " + imageFileName + ": (" + (unitdim.x * scale * IMAGE_PLANE_SIDE_LENGTH) + " : " + (unitdim.y * scale * IMAGE_PLANE_SIDE_LENGTH) + ")", true);
         return imagePlane;
     }
 
+    /// <summary>
+    /// Displays all 4 stimuli in the corners of the vidual field.
+    /// </summary>
     void DisplayStimuli()
     {
         Vector3 Q1 = DISPLAY_LOCATION + QI;
@@ -307,6 +310,14 @@ public class VCP_CameraController : MonoBehaviour
         imageDisplayStartTime = Time.time;
     }
 
+    /// <summary>
+    /// Displays a video in 3D space
+    /// </summary>
+    /// <param name="videoFileName">The name of the video to display</param>
+    /// <param name="location">The location in 3D space to place the video</param>
+    /// <param name="scale">The factor by which to scale the video's size</param>
+    /// <param name="path">The path to the folder in which the video can be found (defaults to timuli/videos/)</param>
+    /// <returns></returns>
     GameObject DisplayVideo(string videoFileName, Vector3 location, float scale, string path = PARADIGM_PATH + "stimuli/videos/")
     {
         //Instantiate the prefab plane for displaying images and set its loccation
@@ -323,10 +334,13 @@ public class VCP_CameraController : MonoBehaviour
         Vector2 unitdim = new Vector2(videoPlayer.clip.width, videoPlayer.clip.height).normalized;
         videoPlane.transform.localScale = new Vector3(videoPlane.transform.localScale.x * unitdim.x * scale, videoPlane.transform.localScale.y * 1, videoPlane.transform.localScale.z * unitdim.y * scale);
 
-        recordData("Scaled size of " + videoFileName + ": (" + (unitdim.x * scale * IMAGE_PLANE_SIDE_LENGTH) + " : " + (unitdim.y * scale * IMAGE_PLANE_SIDE_LENGTH) + ")", true);
+        RecordData("Scaled size of " + videoFileName + ": (" + (unitdim.x * scale * IMAGE_PLANE_SIDE_LENGTH) + " : " + (unitdim.y * scale * IMAGE_PLANE_SIDE_LENGTH) + ")", true);
         return videoPlane;
     }
 
+    /// <summary>
+    /// Displays the ending thank-you message to the subject
+    /// </summary>
     void DisplayEndMessage()
     {
         //Instantiate the prefab plane for displaying images and set its loccation
@@ -336,9 +350,17 @@ public class VCP_CameraController : MonoBehaviour
     #endregion //display and video functions
 
     #region update functions
+    /// <summary>
+    /// This function is a callback for the stimuli videos displayed each round, and is called when they finish.
+    /// It is not called when the instructions video finished.
+    /// The code:
+    ///     Removed the video from the scene
+    ///     Dislpays the fixation dot if it is not already displayed
+    ///     Sets the current event flag to state that the video ended
+    /// </summary>
+    /// <param name="vp">The video player that just stopped plpaying</param>
     void OnVideoOver(VideoPlayer vp)
     {
-        Log("Update: Video done playing");
         videoPlayingDone = true;
         Destroy(videoPlane);
         videoCompletionTime = Time.time;
@@ -352,15 +374,55 @@ public class VCP_CameraController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Code to run once the fixation period on the fixation dotr is done.
+    /// The method removed the fixation dot and displays the next round of stimuli.
+    /// </summary>
+    void OnFixationDone()
+    {
+        //Remove fixation dot 
+        fixationDotCallibrationDone = true;
+        Destroy(fixationDot);
+        fixationDot = null;
+
+        //Display video stimulus
+        DisplayStimuli();
+        currentEvent = "free looking";
+        stimuliNames = q1ImageName + "," + q2ImageName + "," + q3ImageName + "," + q4ImageName + "," + STIMULUS_LIST[currentStimuliListIndex][4];
+    }
+
+    /// <summary>
+    /// Code to run once the fixation period for the ready dot is over.
+    /// It displays the stimulus video for the current round of stimuli
+    /// </summary>
+    void OnReadyDone()
+    {
+        //Remove ready dot 
+        readyDotCallibrationDone = true;
+        Destroy(readyDot);
+
+        //play the video--this is the part where we are interested in user eye movement
+        videoPlane = DisplayVideo(STIMULUS_LIST[currentStimuliListIndex][4], DISPLAY_LOCATION, IMAGE_SCALE);
+        Destroy(fixationDot);
+        fixationDot = null;
+
+        //Write timing data now that video started
+        currentEvent = "video started";
+    }
+
+    /// <summary>
+    /// Runs through the experiment once training is done.
+    /// Data is collected during this period and is flagged as experimental data.
+    /// </summary>
     void RunExperiment()
     {
         //Create a ray
         Ray ray = new Ray(vrCam.transform.position, vrCam.transform.forward);
 
-        //Raycase: if there is a hit, log data about the hit
+        //Raycase: if there is a hit, process it
         if (Physics.Raycast(ray, out RaycastHit hit))
         {
-            //Control fixation dot display time
+            //Callibrate using the fixation dot
             if (hit.transform.name.StartsWith(FIXATION_DOT))
             {
                 //Still calibrating
@@ -368,25 +430,19 @@ public class VCP_CameraController : MonoBehaviour
                 {
                     fixationDotEarliestContinuousHitTime = Time.time;
                 }
-                else if (Time.time - fixationDotEarliestContinuousHitTime >= FIXATION_DOT_DISPLAY_TIME && !fixationDotCallibrationDone)
+                else if (Time.time - fixationDotEarliestContinuousHitTime >= FIXATION_DOT_DISPLAY_TIME
+                    && !fixationDotCallibrationDone)
                 {
-                    Log("Update: Callibration (with the fixation dot) completed");
-                    //Remove fixation dot 
-                    fixationDotCallibrationDone = true;
-                    Destroy(fixationDot);
-                    fixationDot = null;
-
-                    //Display video stimulus
-                    DisplayStimuli();
-                    currentEvent = "free looking";
-                    stimuliNames = q1ImageName + "," + q2ImageName + "," + q3ImageName + "," + q4ImageName + "," + STIMULUS_LIST[currentStimuliListIndex][4];
+                    OnFixationDone();
                 }
             }
             else if (!fixationDotCallibrationDone)
             {
-                //Callibration failed, restart timer.
+                //Calibration failed (user looked away)
                 fixationDotEarliestContinuousHitTime = -1;
             }
+
+            //Callibrate using the ready dot
             else if (hit.transform.name.StartsWith(READY_DOT))
             {
                 //Still calibrating
@@ -394,98 +450,88 @@ public class VCP_CameraController : MonoBehaviour
                 {
                     readyDotEarliestContinuousHitTime = Time.time;
                 }
-                else if (Time.time - readyDotEarliestContinuousHitTime >= READY_DOT_DISPLAY_TIME && !readyDotCallibrationDone)
+                else if (Time.time - readyDotEarliestContinuousHitTime >= READY_DOT_DISPLAY_TIME
+                    && !readyDotCallibrationDone)
                 {
-                    Log("Update: Callibration (with the ready dot) completed: playing video");
-
-                    //Remove ready dot 
-                    readyDotCallibrationDone = true;
-                    Destroy(readyDot);
-
-                    //play the video--this is the part where we are interested in user eye movement
-                    videoPlane = DisplayVideo(STIMULUS_LIST[currentStimuliListIndex][4], DISPLAY_LOCATION, IMAGE_SCALE);
-                    Destroy(fixationDot);
-                    fixationDot = null;
-
-                    //Write timing data now that video started
-                    currentEvent = "video started";
+                    OnReadyDone();
                 }
             }
             else if (!readyDotCallibrationDone)
             {
-                //Callibration failed, restart timer.
+                //Calibration failed (user looked away)
                 readyDotEarliestContinuousHitTime = -1;
             }
 
-            try
-            {
-                recordData(Time.fixedTime.ToString() + "," + (Time.time - lastEventTriggerTime) + "," + ExactPoint(hit.point));
-            }
-            catch (Exception ex)
-            {
-                recordData(Time.fixedTime.ToString() + "," + (Time.time - lastEventTriggerTime) + ",None");
-            }
+            WriteHitData(hit);
         }
 
         //Control the display of the next stimulus once callibration is done
-        if (fixationDotCallibrationDone)
+        if (fixationDotCallibrationDone
+            && Time.time - imageDisplayStartTime >= IMAGE_INITIAL_DISPLAY_TIME_PRE_READY_DOT
+            && !imageInitialDispayDone)
         {
-            if (Time.time - imageDisplayStartTime >= IMAGE_INITIAL_DISPLAY_TIME_PRE_READY_DOT && !imageInitialDispayDone)
-            {
-                Log("Update: Initial image display done, ready to show readyDot");
-                readyDot = DisplayFixationDot(DISPLAY_LOCATION, READY_DOT);
+            readyDot = DisplayFixationDot(DISPLAY_LOCATION, READY_DOT);
 
-                //Now we need to flag the initial image displat as donw
-                imageInitialDispayDone = true;
-            }
+            //Now we need to flag the initial image display as done
+            imageInitialDispayDone = true;
         }
 
         if (imageInitialDispayDone && readyDotCallibrationDone)
         {
-            //After the video has been done for a short time, end the experiment and rest for the next stimuli, if present
-            if (videoPlayingDone && Time.time - videoCompletionTime >= POST_VIDEO_KEEP_DISPLAYING_IMAGES_TIME && !resetting)
+            CheckReset();
+        }
+    }
+
+    /// <summary>
+    /// Checks whether there are more experiment rounds to run.
+    ///     If so, loads the next round
+    ///     If not, displays the end message
+    /// </summary>
+    void CheckReset()
+    {
+        //After the video has been done for a short time, end the experiment and rest for the next stimuli, if present
+        if (videoPlayingDone && Time.time - videoCompletionTime >= POST_VIDEO_KEEP_DISPLAYING_IMAGES_TIME && !resetting)
+        {
+            //Increment the index is the stimuli list
+            currentStimuliListIndex++;
+
+            //Remove stimuli game objects
+            foreach (GameObject go in CURRENT_STIMULI)
             {
-                //Increment the index is the stimuli list
-                currentStimuliListIndex++;
+                Destroy(go);
+            }
+            stimuliNames = ",,,,";
 
-                //Remove stimuli game objects
-                foreach (GameObject go in CURRENT_STIMULI)
-                {
-                    Destroy(go);
-                }
-                stimuliNames = ",,,,";
+            //If there are not more prompts, prepare to terminate
+            if (currentStimuliListIndex >= STIMULUS_LIST.Count)
+            {
+                //Set termination flags
+                resetting = true;
+                resettingStartTime = Time.time;
 
-                //If there are not more prompts, prepare to terminate
-                if (currentStimuliListIndex >= STIMULUS_LIST.Count)
-                {
-                    Log("Update: Program full-reset protocal beginning");
+                //Write out all collected data to disk
+                WriteData();
 
-                    //Set termination flags
-                    resetting = true;
-                    resettingStartTime = Time.time;
-
-                    //Write out all collected data to disk
-                    WriteData();
-                    dataWritten = true;
-
-                    //Display a thank-you message
-                    DisplayEndMessage();
-                }
-                //Else, reset for next round, with the same subject
-                else
-                {
-                    Log("Update: Resetting for the next round of images with the same subject");
-                    ResetForNextRound();
-                }
+                //Display a thank-you message
+                DisplayEndMessage();
+            }
+            //Else, reset for next round, with the same subject
+            else
+            {
+                ResetForNextRound();
             }
         }
     }
 
+    /// <summary>
+    /// Displays instructions to the user. Only ends when the user fixates on the dot, which may be at any time they choose.
+    /// </summary>
+    /// <returns></returns>
     bool RunStartUp()
     {
         if (videoPlane == null)
         {
-            videoPlane = DisplayVideo("VocabInstructions", DISPLAY_LOCATION, IMAGE_SCALE);
+            videoPlane = DisplayVideo("VocabInstructions", DISPLAY_LOCATION, IMAGE_SCALE * 3);
             fixationDot = DisplayFixationDot(DISPLAY_LOCATION + new Vector3(0f, 3f, 0f), FIXATION_DOT);
         }
 
@@ -517,7 +563,6 @@ public class VCP_CameraController : MonoBehaviour
         if (fixationDotCallibrationDone)
         {
             //Reset vars
-            //Destroy(fixationDot);
             fixationDotEarliestContinuousHitTime = -1;
             fixationDotCallibrationDone = false;
             Destroy(videoPlane);
@@ -528,7 +573,14 @@ public class VCP_CameraController : MonoBehaviour
         return false;
     }
 
-    bool RunTrainingOver()
+    /// <summary>
+    /// Should be called while the training period is active.
+    /// It determines when the trianing perioid needs to end and returns after that.
+    ///     The user will see a message saying training is over and need to fixate on a fixation dot for this to occur.
+    /// Data is collected during this period and is flagged as training data.
+    /// </summary>
+    /// <returns></returns>
+    bool RunTraining()
     {
         if (text == null)
         {
@@ -551,7 +603,6 @@ public class VCP_CameraController : MonoBehaviour
                 }
                 else if (Time.time - fixationDotEarliestContinuousHitTime >= FIXATION_DOT_DISPLAY_TIME && !fixationDotCallibrationDone)
                 {
-                    Log("Update: Callibration (with the fixation dot) completed");
                     //Remove fixation dot 
                     fixationDotCallibrationDone = true;
                 }
@@ -575,9 +626,16 @@ public class VCP_CameraController : MonoBehaviour
         return false;
     }
 
+    /// <summary>
+    /// This is the main program update loop. It is called every frame of program execution but the Unity backend.
+    /// It manages transitioning between the major phases of the experiment:
+    ///     Start-up (instructions)
+    ///     Training
+    ///     Experiment collection
+    /// All of those phases are contained in separate funcitons; this code just dicides which one of them should be run.
+    /// </summary>
     void Update()
     {
-        //RunExperiment();
         if (currentStimuliListIndex == -1)
         {
             startUpOver = RunStartUp();
@@ -590,7 +648,7 @@ public class VCP_CameraController : MonoBehaviour
                 fixationDotEarliestContinuousHitTime = -1;
                 fixationDotCallibrationDone = false;
             }
-            trainingOver = RunTrainingOver();
+            trainingOver = RunTraining();
         }
 
         if ((startUpOver && currentStimuliListIndex < NUM_TRAINING_STIMULI) || trainingOver)
@@ -611,7 +669,32 @@ public class VCP_CameraController : MonoBehaviour
         return point.x + "," + point.y + "," + point.z;
     }
 
-    void recordData(string data, bool isHeader = false)
+    /// <summary>
+    /// Writes the recorded hit with proper formatting
+    /// </summary>
+    /// <param name="hit">The raycast his to record</param>
+    void WriteHitData(RaycastHit hit)
+    {
+        string hitData;
+        try
+        {
+            hitData = ExactPoint(hit.point);
+        }
+        catch (Exception ex)
+        {
+            hitData = ",None";
+        }
+        RecordData(Time.fixedTime.ToString() + "," + (Time.time - lastEventTriggerTime) + "," + hitData);
+    }
+
+    /// <summary>
+    /// Writes the given data to the experimental data file. A few notes here:
+    ///     data should be csv formatted
+    ///     Data is not written immediately; instead, it is put into a buffer so that the program does not slow down with each call
+    /// </summary>
+    /// <param name="data">The data to write</param>
+    /// <param name="isHeader">True if the data is indended to organize / label the ouput file rather then provide numeric output</param>
+    void RecordData(string data, bool isHeader = false)
     {
         if (isHeader)
         {
@@ -629,6 +712,9 @@ public class VCP_CameraController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Writes all data contained in the frameDataList to disk
+    /// </summary>
     void WriteData()
     {
         while (frameDataList.Count > 0)
@@ -636,11 +722,13 @@ public class VCP_CameraController : MonoBehaviour
             writer.WriteLine(frameDataList.First.Value);
             frameDataList.RemoveFirst();
         }
-
     }
     #endregion //data functions
 
-    #region reset functions
+    #region reset and quit functions
+    /// <summary>
+    /// Resets the experiment for the next round of stimuli
+    /// </summary>
     void ResetForNextRound()
     {
         videoPlayer = null;
@@ -655,43 +743,20 @@ public class VCP_CameraController : MonoBehaviour
             = imageInitialDispayDone
             = videoPlayingDone
             = resetting
-            = fullResetting
             = false;
 
         currentEvent = "Moving to next stimulus round";
-        Log("ResetForNextRound: reset complete");
     }
 
-    void FullReset()
+    /// <summary>
+    /// Called by Unity when the appliccation closing signal is triggered (such as when the user closes the app). It:
+    ///     Writes all collected data to disk
+    ///     Closes open resources to prevent memory leaks
+    /// </summary>
+    void OnApplicationQuit()
     {
-        //Reset all vars to default values
-        frameDataList.Clear();
-        STIMULUS_LIST.Clear();
-        fixationDot = null;
-        readyDot = null;
-        CURRENT_STIMULI.Clear();
-        videoPlayer = null;
-        fixationDotEarliestContinuousHitTime =
-            readyDotEarliestContinuousHitTime = -1;
-        imageDisplayStartTime
-            = videoCompletionTime
-            = resettingStartTime
-            = 0;
-        fixationDotCallibrationDone
-            = readyDotCallibrationDone
-            = imageInitialDispayDone
-            = videoPlayingDone
-            = resetting
-            = fullResetting
-            = false;
-        currentStimuliListIndex = -1;
-        Destroy(thankYou);
-
-
-        Log("FullReset: reset complete");
-
-        //Begin the experiment again
-        BeginExperiment();
+        WriteData();
+        writer.Close();
     }
-    #endregion //reset functions
+    #endregion /reset and quit functions
 }
