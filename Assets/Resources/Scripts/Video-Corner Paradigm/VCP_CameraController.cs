@@ -254,8 +254,6 @@ public class VCP_CameraController : MonoBehaviour
         GameObject backgroudPlane = Instantiate(Resources.Load<GameObject>(PARADIGM_PATH + "BackgroundPlanePrefab"));
         backgroudPlane.transform.position = location;
         backgroudPlane.name = "backgroundPlane";
-
-        //Return the instantiated GameObject
         return backgroudPlane;
     }
 
@@ -659,11 +657,21 @@ public class VCP_CameraController : MonoBehaviour
     #endregion //update functions
 
     #region data functions
+
+    /// <summary>
+    /// Gets the current time as a string in a form that is safe to use for naming files (free of invalid special characters)
+    /// </summary>
+    /// <returns>a string representing the current time</returns>
     string getCleanDateTime()
     {
         return DateTime.Now.ToShortDateString().Replace('/', '-') + "__" + DateTime.Now.ToLongTimeString().Replace(':', '-');
     }
 
+    /// <summary>
+    /// Creates a string containing the exact x,y,z data of the given point, delimited by commas in the for x1,y1,z1
+    /// </summary>
+    /// <param name="point">the point whoe value is wanted</param>
+    /// <returns>a string containing the loc. of the point to maximum precision</returns>
     string ExactPoint(Vector3 point)
     {
         return point.x + "," + point.y + "," + point.z;
