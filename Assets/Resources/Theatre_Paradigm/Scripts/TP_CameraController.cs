@@ -2,6 +2,8 @@
 using UnityEngine;
 using System;
 using System.IO;
+using System.Diagnostics;
+using System.Collections.Specialized;
 
 public class TP_CameraController : MonoBehaviour
 {
@@ -16,7 +18,7 @@ public class TP_CameraController : MonoBehaviour
     StreamWriter writer;
 
     //Experiment constants
-    static readonly Vector3 DISPLAY_LOCATION = new Vector3(0, 0, 10);
+    static readonly Vector3 DISPLAY_LOCATION_CENTER = new Vector3(0, 0, 10);
     static readonly int FIXATION_DOT_DISPLAY_TIME = 1,
         IMAGE_DISPLAY_TIME = 10,
         NUM_TRAINING_STIMULI = 0;
@@ -28,9 +30,12 @@ public class TP_CameraController : MonoBehaviour
 
     //Experiment Management
     readonly List<string> STIMULUS_LIST = new List<string>();
+    readonly List<object[]> STIMULUS_META = new List<object[]>();
     readonly LinkedList<GameObject> CURRENT_STIMULI = new LinkedList<GameObject>();
     GameObject text;
     System.Random GENERATOR = new System.Random();
+    Vector3 curr_scaled_img_bottom_left,
+        curr_scaled_img_scale;
 
     const string DATA_EXTENSION = ".csv",
         EXPERIMENT_FILE_BASE_NAME = "TP_";
@@ -66,8 +71,8 @@ public class TP_CameraController : MonoBehaviour
         ConfigureFileSystem();
         InitStimuliList();
         InitOutStream();
-        fixationDot = DisplayFixationDot(DISPLAY_LOCATION, FIXATION_DOT);
-        recordData("Image loaction" + ExactPoint(DISPLAY_LOCATION), true);
+        fixationDot = DisplayFixationDot(FixationDotLocForCurrentStimulus(), FIXATION_DOT);
+        recordData("Image loaction" + ExactPoint(DISPLAY_LOCATION_CENTER), true);
         recordData("stimulus name,event,time,time since last event,x,y,z", true);
         vrCam = gameObject.GetComponent(typeof(Camera)) as Camera;
     }
@@ -87,22 +92,80 @@ public class TP_CameraController : MonoBehaviour
         }
         catch (Exception ex)
         {
-            Debug.Log("CameraController: WriteData: Failed to write data file!");
-            Debug.Log(ex.StackTrace);
+            UnityEngine.Debug.Log("CameraController: WriteData: Failed to write data file!");
+            UnityEngine.Debug.Log(ex.StackTrace);
         }
     }
 
+    /// <summary>
+    /// Initialized the stimulus list and stimulus_meta dictionary by loading data from a CSV file.
+    /// Input data should be in CSV format; lines beginning with '#' are ignored.The file should have the following order of items:
+    /// 0 - pic (string)
+    /// 1 - x (int)
+    /// 2 - y (int)
+    /// 3 - focus (strong)
+    /// 4 - animacy (string)
+    /// 5 - event (string)
+    /// 6 - side (string)
+    /// 7 - an_hierarchy (string)
+    /// 8 - x_ratio (float)
+    /// 9 - y_ratio (float)
+    /// </summary>
     void InitStimuliList()
     {
-        List<string> trainingList = new List<string>();
         TextAsset data = Resources.Load<TextAsset>("Theatre_Paradigm/Experiment_Data/" + experimentSpecificationsFileName);
         string data_text = data.text;
         foreach (string line in data_text.Split('\n'))
         {
-            STIMULUS_LIST.Add(line.Trim());
+            if (line.Length == 0 || line[0] == '#')
+            {
+                continue;
+            }
+
+            object[] meta_list = new object[9];
+            string cleaned = line.Trim();
+            string[] elements = cleaned.Split(',');
+            
+            for (int i = 0; i < cleaned.Length; i++)
+            {
+                switch (i)
+                {
+                    case 1:
+                        meta_list[i - 1] = Int32.Parse(elements[i]);
+                        break;
+                    case 2:
+                        meta_list[i - 1] = Int32.Parse(elements[i]);
+                        break;
+                    case 3:
+                        meta_list[i - 1] = elements[i];
+                        break;
+                    case 4:
+                        meta_list[i - 1] = elements[i];
+                        break;
+                    case 5:
+                        meta_list[i - 1] = elements[i];
+                        break;
+                    case 6:
+                        meta_list[i - 1] = elements[i];
+                        break;
+                    case 7:
+                        meta_list[i - 1] = elements[i];
+                        break;
+                    case 8:
+                        meta_list[i - 1] = float.Parse(elements[i]);
+                        break;
+                    case 9:
+                        meta_list[i - 1] = float.Parse(elements[i]);
+                        break;
+                }
+            }
+            string stimulus = elements[0].Split('.')[0];
+            STIMULUS_LIST.Add(stimulus); //Do not add image extension
+            STIMULUS_META.Add(meta_list);
         }
 
         //Load the first NUM_TRAINING_STIMULI elements from the simulus list as training elements only
+        List<string> trainingList = new List<string>();
         for (int i = 0; i < NUM_TRAINING_STIMULI; i++)
         {
             trainingList.Insert(0, STIMULUS_LIST[0]);
@@ -118,6 +181,9 @@ public class TP_CameraController : MonoBehaviour
             STIMULUS_LIST.Insert(0, trainingList[0]);
             trainingList.RemoveAt(0);
         }
+
+        UnityEngine.Debug.Log(STIMULUS_LIST);
+        UnityEngine.Debug.Log(STIMULUS_META);
     }
 
     /// <summary>
@@ -207,12 +273,12 @@ public class TP_CameraController : MonoBehaviour
 
     void Update()
     {
-        if(calibrating)
+        if (calibrating)
         {
             if (!fixationDot)
             {
                 currentEvent = "fixation dot-ing";
-                fixationDot = DisplayFixationDot(DISPLAY_LOCATION, FIXATION_DOT);
+                fixationDot = DisplayFixationDot(FixationDotLocForCurrentStimulus(), FIXATION_DOT);
             }
             RunFixationDot();
         }
@@ -220,7 +286,7 @@ public class TP_CameraController : MonoBehaviour
         {
             if (currentStimuliListIndex >= STIMULUS_LIST.Count && !displaying)
             {
-                if(!ended)
+                if (!ended)
                 {
                     DisplayEndMessage();
                     WriteData();
@@ -232,7 +298,7 @@ public class TP_CameraController : MonoBehaviour
                 if (!displaying)
                 {
                     imageDisplayStartTime = Time.time;
-                    image = DisplayImage(STIMULUS_LIST[currentStimuliListIndex], DISPLAY_LOCATION, IMAGE_SCALE);
+                    image = DisplayImage(STIMULUS_LIST[currentStimuliListIndex]);
                     currentStimuliListIndex++;
                     displaying = true;
                 }
@@ -243,11 +309,11 @@ public class TP_CameraController : MonoBehaviour
     #endregion //update functions
 
     #region display functions
-    GameObject DisplayImage(string imageFileName, Vector3 location, float scale, string path = "Theatre_Paradigm/stimuli/images/")
+    GameObject DisplayImage(string imageFileName, string path = "Theatre_Paradigm/stimuli/images/")
     {
         //Instantiate the prefab plane for displaying images and set its loccation
         GameObject imagePlane = Instantiate(Resources.Load<GameObject>("Theatre_Paradigm/ImagePlanePrefab"));
-        imagePlane.transform.position = location;
+        imagePlane.transform.position = DISPLAY_LOCATION_CENTER;
         imagePlane.name = imageFileName;
 
         //Load the image onto the plane prefab
@@ -255,12 +321,15 @@ public class TP_CameraController : MonoBehaviour
         Texture image_texture = Resources.Load<Texture>(path + imageFileName);
 
         Vector2 unitdim = new Vector2(image_texture.width, image_texture.height).normalized;
-        imagePlane.transform.localScale = new Vector3(imagePlane.transform.localScale.x * unitdim.x * scale, imagePlane.transform.localScale.y * 1, imagePlane.transform.localScale.z * unitdim.y * scale);
+        imagePlane.transform.localScale = new Vector3(imagePlane.transform.localScale.x * unitdim.x * IMAGE_SCALE, imagePlane.transform.localScale.y * 1, imagePlane.transform.localScale.z * unitdim.y * IMAGE_SCALE);
 
         image_material.mainTexture = image_texture;
         imagePlane.GetComponent<Renderer>().material = image_material;
 
-        recordData("Scaled size of " + imageFileName + ": (" + (unitdim.x * scale * IMAGE_PLANE_SIDE_LENGTH) + " : " + (unitdim.y * scale * IMAGE_PLANE_SIDE_LENGTH) + ")", true);
+        curr_scaled_img_bottom_left = imagePlane.transform.position - (new Vector3(unitdim.x * IMAGE_SCALE * IMAGE_PLANE_SIDE_LENGTH, unitdim.y * IMAGE_SCALE * IMAGE_PLANE_SIDE_LENGTH, 0) / 2);
+        curr_scaled_img_scale = new Vector3(unitdim.x * IMAGE_SCALE * IMAGE_PLANE_SIDE_LENGTH, unitdim.y * IMAGE_SCALE * IMAGE_PLANE_SIDE_LENGTH, 0);
+
+        recordData("Scaled size of " + imageFileName + ": (" + (unitdim.x * IMAGE_SCALE * IMAGE_PLANE_SIDE_LENGTH) + " : " + (unitdim.y * IMAGE_SCALE * IMAGE_PLANE_SIDE_LENGTH) + ")", true);
         return imagePlane;
     }
 
@@ -277,7 +346,7 @@ public class TP_CameraController : MonoBehaviour
     {
         //Instantiate the prefab plane for displaying images and set its loccation
         thankYou = Instantiate(Resources.Load("Theatre_Paradigm/Thank_You") as GameObject);
-        thankYou.transform.position = DISPLAY_LOCATION;
+        thankYou.transform.position = DISPLAY_LOCATION_CENTER;
     }
     #endregion //display functions
 
@@ -285,6 +354,18 @@ public class TP_CameraController : MonoBehaviour
     string getCleanDateTime()
     {
         return DateTime.Now.ToShortDateString().Replace('/', '-') + "__" + DateTime.Now.ToLongTimeString().Replace(':', '-');
+    }
+
+    Vector3 FixationDotLocForCurrentStimulus(string path = "Theatre_Paradigm/stimuli/images/")
+    {
+        Texture image_texture = Resources.Load<Texture>(path + STIMULUS_LIST[currentStimuliListIndex]);
+        Vector2 unitdim = new Vector2(image_texture.width, image_texture.height).normalized;
+
+        curr_scaled_img_bottom_left = DISPLAY_LOCATION_CENTER - (new Vector3(unitdim.x * IMAGE_SCALE * IMAGE_PLANE_SIDE_LENGTH, unitdim.y * IMAGE_SCALE * IMAGE_PLANE_SIDE_LENGTH, 0) / 2);
+        curr_scaled_img_scale = new Vector3(unitdim.x * IMAGE_SCALE * IMAGE_PLANE_SIDE_LENGTH, unitdim.y * IMAGE_SCALE * IMAGE_PLANE_SIDE_LENGTH, 0);
+
+        Vector3 relative_offset = new Vector3(((float) STIMULUS_META[currentStimuliListIndex][7]) * curr_scaled_img_scale.x, ((float) STIMULUS_META[currentStimuliListIndex][8]) * curr_scaled_img_scale.y, 0);
+        return curr_scaled_img_bottom_left + relative_offset;
     }
 
     string ExactPoint(Vector3 point)
@@ -312,12 +393,12 @@ public class TP_CameraController : MonoBehaviour
 
     void WriteData()
     {
-        while(frameDataList.Count > 0)
+        while (frameDataList.Count > 0)
         {
             writer.WriteLine(frameDataList.First.Value);
             frameDataList.RemoveFirst();
         }
-        
+
     }
     #endregion //data functions
 }

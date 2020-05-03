@@ -1,4 +1,11 @@
-58_elephant_ride_man
-73_clown_push_tv
-90_ball_carry_girl
-95_window_paint_clown
+#pic,x,y,focus,animacy,event,side,an_hierarchy,x_ratio,y_ratio
+11_rabbit_kick_boy.jpg,233,482,agent,animate,kick,left,low,0.274117647058823,0.746130030959752
+13_man_push_horse.jpg,250,500,patient,animate,push,left,low,0.294117647058823,0.773993808049536
+15_duck_push_boy.jpg,500,500,patient,animate,push,right,high,0.588235294117647,0.773993808049536
+29_dad_kick_table.jpg,604,488,agent,animate,kick,right,high,0.710588235294118,0.755417956656347
+31_ball_kick_horse.jpg,541,477,patient,animate,kick,right,high,0.636470588235294,0.738390092879257
+38_door_paint_boy.jpg,327,435,agent,inanimate,paint,left,low,0.384705882352941,0.673374613003096
+43_horse_feed_woman.jpg,207,441,patient,animate,feed,left,high,0.243529411764706,0.68266253869969
+44_man_feed_cow.jpg,604,444,agent,animate,feed,right,high,0.710588235294118,0.687306501547988
+banana_paint_fish.jpg,122,465,agent,inanimate,paint,left,low,0.199346405228758,0.587121212121212
+frog_paint_door.jpg,520,495,patient,inanimate,paint,right,low,0.611764705882353,0.76625386996904
